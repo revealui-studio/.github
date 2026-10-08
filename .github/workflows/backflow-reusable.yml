@@ -39,6 +39,8 @@ name: backflow-reusable
 #   jobs:
 #     backflow:
 #       uses: RevealUIStudio/.github/.github/workflows/backflow-reusable.yml@<sha>
+#       with:
+#         backflow_bot_login: <app-slug or app-slug[bot]>
 #       secrets:
 #         BACKFLOW_APP_ID: ${{ secrets.BACKFLOW_APP_ID }}
 #         BACKFLOW_APP_PRIVATE_KEY: ${{ secrets.BACKFLOW_APP_PRIVATE_KEY }}
@@ -46,11 +48,24 @@ name: backflow-reusable
 # pull_request on test runs job `backflow-current` (required-check name
 # `backflow / backflow-current`): fail other PRs into test while origin/test
 # does not contain origin/main, so agents cannot race the auto-backflow.
-# The backflow PR head `chore/backflow-main-into-test` is allowed through.
+# A head branch named `chore/backflow-main-into-test` is not enough to skip
+# that check. The skip applies only when the head repository equals the base
+# repository and the PR author is the Backflow App bot given in
+# `backflow_bot_login` (bot login or app slug). Otherwise the normal check runs.
 # Land job runs only on push.
 
 on:
   workflow_call:
+    inputs:
+      backflow_bot_login:
+        description: >-
+          Backflow GitHub App bot login (app-slug[bot]) or app slug. The
+          behind-main gate skips only for a same-repository pull request
+          from that bot on chore/backflow-main-into-test. Empty, or any
+          other author or fork, runs the normal check.
+        required: false
+        type: string
+        default: ""
     secrets:
       BACKFLOW_APP_ID:
         description: App ID for the revfleet-backflow GitHub App.
@@ -327,7 +342,9 @@ jobs:
   # Required-check name when the caller job id is `backflow`:
   #   backflow / backflow-current
   # Fail other PRs into test while origin/test does not contain origin/main.
-  # The auto-backflow PR itself must still merge.
+  # Skip that failure only for an in-repo PR authored by the Backflow App bot
+  # (`backflow_bot_login`) on `chore/backflow-main-into-test`.
+  # Any other PR runs the normal check, including one that only copies the branch name.
   backflow-current:
     name: backflow-current
     if: github.event_name == 'pull_request'
@@ -342,12 +359,103 @@ jobs:
       - name: Block merges onto test while test is behind main
         env:
           HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
+          HEAD_REPO_ID: ${{ github.event.pull_request.head.repo.id }}
+          BASE_REPO_ID: ${{ github.event.pull_request.base.repo.id }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          BACKFLOW_BOT_LOGIN: ${{ inputs.backflow_bot_login }}
         run: |
           set -euo pipefail
 
-          if [ "$HEAD_REF" = "chore/backflow-main-into-test" ]; then
-            echo "backflow PR itself — allowing merge so ancestry can heal"
+          # BEGIN backflow exemption predicate
+          # Exemption requires every condition below. A matching branch name
+          # alone returns failure so the ancestry check still runs.
+          is_backflow_exemption() {
+            local head_ref="$1"
+            local login_raw="$2"
+            local pr_author="$3"
+            local pr_author_type="$4"
+            local head_repo_id="$5"
+            local base_repo_id="$6"
+            local head_repo="$7"
+            local base_repo="$8"
+
+            [ "$head_ref" = "chore/backflow-main-into-test" ] || return 1
+
+            local login="$login_raw"
+            login="${login#"${login%%[![:space:]]*}"}"
+            login="${login%"${login##*[![:space:]]}"}"
+            [ -n "$login" ] || return 1
+            [ "${#login}" -le 80 ] || return 1
+            printf '%s' "$login" | grep -Eq '^[A-Za-z0-9-]+(\[bot\])?$' || return 1
+
+            local expected
+            case "$login" in
+              *'[bot]') expected="$login" ;;
+              *) expected="${login}[bot]" ;;
+            esac
+
+            local author_lc expected_lc head_repo_lc base_repo_lc
+            author_lc=$(printf '%s' "$pr_author" | tr '[:upper:]' '[:lower:]')
+            expected_lc=$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')
+            head_repo_lc=$(printf '%s' "$head_repo" | tr '[:upper:]' '[:lower:]')
+            base_repo_lc=$(printf '%s' "$base_repo" | tr '[:upper:]' '[:lower:]')
+
+            [ "$pr_author_type" = "Bot" ] || return 1
+            [ -n "$author_lc" ] || return 1
+            [ "$author_lc" = "$expected_lc" ] || return 1
+            printf '%s' "$head_repo_id" | grep -Eq '^[0-9]+$' || return 1
+            [ "$head_repo_id" = "$base_repo_id" ] || return 1
+            [ -n "$head_repo_lc" ] || return 1
+            [ "$head_repo_lc" != "null" ] || return 1
+            [ "$head_repo_lc" = "$base_repo_lc" ] || return 1
+            return 0
+          }
+          # END backflow exemption predicate
+
+          # Lock the branch-name bypass. A broken predicate fails closed.
+          if is_backflow_exemption "chore/backflow-main-into-test" "" "app-slug[bot]" "Bot" "1" "1" "o/r" "o/r"; then
+            echo "::error title=exemption self-test failed::branch name alone granted an exemption"
+            exit 1
+          fi
+          if is_backflow_exemption "chore/backflow-main-into-test" "app-slug" "app-slug[bot]" "Bot" "7" "8" "o/r" "o/r"; then
+            echo "::error title=exemption self-test failed::fork head repository granted an exemption"
+            exit 1
+          fi
+          if is_backflow_exemption "chore/backflow-main-into-test" "app-slug" "person" "User" "1" "1" "o/r" "o/r"; then
+            echo "::error title=exemption self-test failed::a non-bot author granted an exemption"
+            exit 1
+          fi
+          if is_backflow_exemption "chore/backflow-main-into-test" "person" "person" "User" "1" "1" "o/r" "o/r"; then
+            echo "::error title=exemption self-test failed::a person login granted an exemption"
+            exit 1
+          fi
+          if ! is_backflow_exemption "chore/backflow-main-into-test" "app-slug" "app-slug[bot]" "Bot" "1" "1" "Org/Repo" "org/repo"; then
+            echo "::error title=exemption self-test failed::app slug did not match the in-repo bot"
+            exit 1
+          fi
+          if ! is_backflow_exemption "chore/backflow-main-into-test" "app-slug[bot]" "App-Slug[bot]" "Bot" "1" "1" "o/r" "o/r"; then
+            echo "::error title=exemption self-test failed::bot login did not match the in-repo bot"
+            exit 1
+          fi
+
+          if is_backflow_exemption \
+            "${HEAD_REF:-}" \
+            "${BACKFLOW_BOT_LOGIN:-}" \
+            "${PR_AUTHOR:-}" \
+            "${PR_AUTHOR_TYPE:-}" \
+            "${HEAD_REPO_ID:-}" \
+            "${BASE_REPO_ID:-}" \
+            "${HEAD_REPO:-}" \
+            "${BASE_REPO:-}"; then
+            echo "in-repo Backflow App backflow PR: allowing merge so ancestry can heal"
             exit 0
+          fi
+
+          if [ "${HEAD_REF:-}" = "chore/backflow-main-into-test" ]; then
+            echo "head branch matches the backflow branch, but this pull request is not an in-repo Backflow App pull request; running the normal check"
           fi
 
           exists=0
