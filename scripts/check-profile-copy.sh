@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fail when profile/README.md carries a retired Studio price, a retired
-# public name, or an em dash (U+2014).
+# public name, an em dash (U+2014), or a link to a repo that moved to the
+# revealui-studio org but is still addressed under RevealUIStudio.
 set -euo pipefail
 
 # U+2014 as UTF-8 bytes e2 80 94. Bash $'\u2014' expands to the six
@@ -40,7 +41,8 @@ self_test() {
     fi
   done
 
-  for name in 'Stage B' 'Domain pack' 'Proof Sprint'; do
+  for name in 'Stage B' 'Domain pack' 'Proof Sprint' 'RevFleet' \
+    'https://github.com/RevealUIStudio/revvault' 'npx skills add RevealUIStudio/revskills'; do
     printf '%s\n' "$name" > "$tmp/name.md"
     set +e
     output=$(LC_ALL=C bash "$0" "$tmp/name.md" 2>&1)
@@ -83,8 +85,17 @@ if LC_ALL=C grep -nE '\$1,500|\$3,500|\$7,500|\$1500|\$3500|\$7500' "$file"; the
   fail=1
 fi
 
-if LC_ALL=C grep -nF -e 'Stage B' -e 'Domain pack' -e 'Proof Sprint' -- "$file"; then
+if LC_ALL=C grep -nF -e 'Stage B' -e 'Domain pack' -e 'Proof Sprint' -e 'RevFleet' -- "$file"; then
   echo "error: retired public name in $file" >&2
+  fail=1
+fi
+
+# Repos already transferred to the revealui-studio org. GitHub redirects the
+# old paths today, but a redirect breaks if a repo with the old name is ever
+# created under RevealUIStudio. Add revealui here once it moves.
+moved='(revvault|revskills|revkit|revcon|revdev|revmind|status|agency|revealui-template-[a-z-]+)'
+if LC_ALL=C grep -nE "RevealUIStudio/${moved}([^a-z-]|$)" "$file"; then
+  echo "error: link to a moved repo under RevealUIStudio in $file (use revealui-studio/)" >&2
   fail=1
 fi
 
