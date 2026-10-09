@@ -37,10 +37,28 @@ jobs:
 
 Bump the pin via Dependabot `github-actions` or a deliberate fleet PR.
 
+## CLIENT_LEAK_PATTERNS
+
+One organization Actions secret. Do not commit the pattern list, and do not
+create a separate repository secret per repo.
+
+Set it under Organization secrets for `revealui-studio`:
+[Secrets and variables → Actions](https://github.com/organizations/revealui-studio/settings/secrets/actions).
+Name: `CLIENT_LEAK_PATTERNS`. Repository access: Selected repositories.
+Grant `agency`, `revcon`, `revdev`, `revkit`, `revmind`, `revskills`,
+`revvault`, and `status`.
+
+Value: one `tag|literal|reason` line per pattern. Jobs read
+`secrets.CLIENT_LEAK_PATTERNS` and pass it as the workflow secret
+`client_leak_patterns`. An empty value fails closed. An environment secret
+or a Dependabot secret is invisible here: these jobs do not set
+`environment:`, and they are not Dependabot.
+
 ## check-client-leaks (composite)
 
 Runs `scripts/check-client-leaks.sh` in the consumer repo. Keep job **name**
 `Client / prospect name leak scan` on the caller (ruleset-required on some repos).
+CI must pass the org secret. The scanner fails closed when it is empty.
 
 ```yaml
 jobs:
@@ -51,7 +69,6 @@ jobs:
     steps:
       - uses: RevealUIStudio/.github/.github/actions/check-client-leaks@<pin-sha>
         with:
-          # optional — only if the repo loads patterns from a secret
           client_leak_patterns: ${{ secrets.CLIENT_LEAK_PATTERNS }}
 ```
 
@@ -108,5 +125,9 @@ concurrency:
 jobs:
   scan:
     uses: RevealUIStudio/.github/.github/workflows/issue-leak-scan-reusable.yml@<pin-sha>
-    secrets: inherit
+    secrets:
+      client_leak_patterns: ${{ secrets.CLIENT_LEAK_PATTERNS }}
 ```
+
+Pass that one secret only. `secrets: inherit` on `pull_request_target` would
+forward every caller secret into the reusable workflow.

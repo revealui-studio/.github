@@ -2,15 +2,40 @@
 #
 # Thin callers keep local triggers + permissions and call this with:
 #   uses: RevealUIStudio/.github/.github/workflows/issue-leak-scan-reusable.yml@<sha>
-#   secrets: inherit
+#   secrets:
+#     client_leak_patterns: ${{ secrets.CLIENT_LEAK_PATTERNS }}
 #
-# Requires the consumer repo to have `.gitleaks.issues.toml` on its default branch
-# (checked out below). Not a required status check — reusable workflow is fine.
+# Pass only that one secret. Do not use `secrets: inherit`: these events include
+# pull_request_target, and no other secret is needed here.
+#
+# Two jobs:
+#   scan  - gitleaks with the consumer repo's `.gitleaks.issues.toml` (non-name
+#           rules), read from its default branch.
+#   names - the consumer repo's client-leak scanner (default
+#           scripts/check-client-leaks.sh, from its default branch) run against
+#           the event body with the pattern list from the client_leak_patterns
+#           secret. The list is never committed and never printed. An empty
+#           secret fails closed.
+# Not a required status check; reusable workflow is fine.
 
 name: issue-leak-scan-reusable
 
 on:
   workflow_call:
+    inputs:
+      scanner_script:
+        description: >-
+          Repo-relative path to the client-leak scanner, read from the default
+          branch. Contract: exit 0 clean, 1 match, 2 setup error.
+        type: string
+        required: false
+        default: scripts/check-client-leaks.sh
+    secrets:
+      client_leak_patterns:
+        description: >-
+          Multiline client-leak pattern list (one tag|literal|reason line per
+          line). Pass secrets.CLIENT_LEAK_PATTERNS. Empty fails closed.
+        required: true
 
 permissions:
   issues: write
@@ -142,3 +167,122 @@ jobs:
             }
 
             core.setFailed(`${findings.length} sensitive match(es) flagged. Body/comment labelled.`);
+
+  names:
+    name: Client / prospect name leak scan
+    # Same bot skip as the scan job.
+    if: >-
+      github.actor != 'github-actions[bot]'
+      && github.actor != 'dependabot[bot]'
+      && github.actor != 'chatgpt-codex-connector[bot]'
+      && (github.event.comment == null || github.event.comment.user.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Require pattern secret (fail closed)
+        env:
+          CLIENT_LEAK_PATTERNS: ${{ secrets.client_leak_patterns }}
+        run: |
+          set -euo pipefail
+          # Test for content without printing it.
+          if [[ -z "${CLIENT_LEAK_PATTERNS//[[:space:]]/}" ]]; then
+            echo "::error::client_leak_patterns is empty. The caller must pass secrets.CLIENT_LEAK_PATTERNS and that secret must exist for this repo. Failing closed."
+            exit 2
+          fi
+          echo "[client-leak] pattern secret present."
+
+      # Trusted code only: the default branch, never the PR head.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Write event body outside the checkout
+        id: body
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('node:fs');
+            // Read body via context API; no shell interpolation of user input.
+            const body =
+              context.payload.comment?.body
+              ?? context.payload.issue?.body
+              ?? context.payload.pull_request?.body
+              ?? '';
+            fs.mkdirSync('/tmp/client-name-scan', { recursive: true, mode: 0o700 });
+            fs.writeFileSync('/tmp/client-name-scan/body.txt', body, { encoding: 'utf8', mode: 0o600 });
+            core.setOutput('empty', body.length === 0 ? 'true' : 'false');
+
+      - name: Scan body with secret-backed patterns
+        id: scan
+        if: steps.body.outputs.empty != 'true'
+        env:
+          CLIENT_LEAK_PATTERNS: ${{ secrets.client_leak_patterns }}
+          SCANNER_SCRIPT: ${{ inputs.scanner_script }}
+        run: |
+          set -uo pipefail
+          if [[ ! -f "$SCANNER_SCRIPT" ]]; then
+            echo "::error::Scanner script not found on the default branch: $SCANNER_SCRIPT. Failing closed."
+            echo "code=2" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Discard all scanner output. A hit line can contain the matched text.
+          bash "$SCANNER_SCRIPT" /tmp/client-name-scan/body.txt >/dev/null 2>&1
+          code=$?
+          case "$code" in
+            0|1|2) ;;
+            *) code=2 ;;
+          esac
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "[client-leak] body scan clean." ;;
+            1) echo "[client-leak] body matched the secret pattern list. Match text withheld." ;;
+            *) echo "::error::Client-leak scanner exited with a setup error. Output withheld. Failing closed." ;;
+          esac
+
+      - name: Comment and label on a match
+        if: steps.scan.outputs.code == '1'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const issueNumber =
+              context.payload.issue?.number
+              ?? context.payload.pull_request?.number;
+            if (!issueNumber) {
+              core.setFailed('Client-leak scan matched, but no issue number was available.');
+              return;
+            }
+            const commentBody = [
+              '> [!CAUTION]',
+              '> **Possible client or prospect name detected.**',
+              '',
+              'The secret-backed client-leak scanner matched this body.',
+              'Edit the body and replace the name with a placeholder. Do not paste the matched text back into the thread.',
+              'To erase it from edit history, delete and recreate the issue or comment.',
+              '',
+              'The pattern list lives in the `CLIENT_LEAK_PATTERNS` Actions secret, not in any repository.',
+              'Once cleaned, remove the `contains-sensitive-content` label.',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: commentBody,
+            });
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['contains-sensitive-content'],
+              });
+            } catch (err) {
+              core.warning(`addLabels failed: ${err.message}`);
+            }
+
+      - name: Fail when the scan is not clean
+        if: steps.body.outputs.empty != 'true' && steps.scan.outputs.code != '0'
+        env:
+          SCAN_CODE: ${{ steps.scan.outputs.code }}
+        run: exit "${SCAN_CODE:-2}"

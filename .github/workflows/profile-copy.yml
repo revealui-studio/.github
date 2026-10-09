@@ -1,0 +1,22 @@
+name: profile copy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  profile-copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Refuse retired prices, names, and em dashes
+        run: bash scripts/check-profile-copy.sh profile/README.md
+      - name: Self-test em dash byte match
+        run: bash scripts/check-profile-copy.sh --self-test
