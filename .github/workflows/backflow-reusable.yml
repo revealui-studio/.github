@@ -53,10 +53,10 @@ on:
   workflow_call:
     secrets:
       BACKFLOW_APP_ID:
-        description: App ID for the revfleet-backflow GitHub App.
+        description: Numeric App ID for the configured backflow GitHub App.
         required: true
       BACKFLOW_APP_PRIVATE_KEY:
-        description: Private key (PEM) for the revfleet-backflow GitHub App.
+        description: Private key (PEM) for that same configured backflow GitHub App.
         required: true
 
 permissions:
@@ -311,7 +311,8 @@ jobs:
           # Do not apply backflow:merge-commit. That label is a human acknowledgment
           # ("I will merge with a merge commit, not squash"). The App stamping it
           # would forge the ack. The caller's merge-method guard passes this PR
-          # when the author is revfleet-backflow[bot] and the head is
+          # when the author matches the authenticated App token's app-slug output
+          # plus [bot], and the head is
           # chore/backflow-main-into-test. Hand-rolled backflows still need the
           # label. Ancestry mode still fails a squash after the fact.
 
@@ -367,5 +368,5 @@ jobs:
           fi
 
           behind=$(git rev-list --count origin/test..origin/main)
-          echo "::error title=test is behind main::origin/test is $behind commit(s) behind origin/main. Wait for revfleet-backflow to land (auto-merge, merge-commit only). Do not squash. Do not merge this PR until test contains main."
+          echo "::error title=test is behind main::origin/test is $behind commit(s) behind origin/main. Wait for the configured backflow App to land (auto-merge, merge-commit only). Do not squash. Do not merge this PR until test contains main."
           exit 1
