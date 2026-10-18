@@ -16,20 +16,10 @@ Try it:
 
 - `npx create-revealui@latest`
 - GitHub templates: [starter](https://github.com/RevealUIStudio/revealui-template-starter), [basic-blog](https://github.com/RevealUIStudio/revealui-template-basic-blog), [portfolio](https://github.com/RevealUIStudio/revealui-template-portfolio), [e-commerce](https://github.com/RevealUIStudio/revealui-template-e-commerce)
-- [Governed Agent Run on Apify](https://apify.com/revealuistudio/governed-agent-run): PPE $0.00001, not free
 
 ## Studio · [revealuistudio.com](https://revealuistudio.com)
 
 Book a 30-minute intro on Google Calendar. No account. No payment to book. Paid work is invoiced after we agree.
-
-- **Consultation:** $300/hr (default 1 hour)
-- **Pilot:** $3,997 (includes 1 Adapter; 100% credit toward Launch within 45 days)
-- **Launch:** $14,500 (up to 3 Adapters)
-- **Care:** $1,997/mo (optional)
-- **Adapter:** $2,497 (one tool category per unit; added to Pilot, Launch, or Care, never sold alone)
-- **Domain add-on:** $297 (after a Consultation alone; included with Pilot and Launch)
-
-Architecture work is inside Launch. Pilot is one site on your domain.
 
 [Book a 30-minute intro](https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ21UZVcuYp7yO32rZmhyUvZFDJcvles81E9edGNFwSUP8SHEVzGvq0gKgNFo7q04YS5i-12ZE5P)
 
