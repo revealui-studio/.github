@@ -12,8 +12,6 @@ Three things, in three places.
 
 [**RevealUI**](https://github.com/RevealUIStudio/revealui) is an open-source TypeScript runtime that ships five business primitives: **Users** (auth, RBAC/ABAC, agent identity), **Content** (admin engine, collections, rich text), **Products** (catalog, pricing, license keys), **Payments** (Stripe billing with webhook reconciliation), and **Intelligence** (agent orchestration, open-model inference, RAG, MCP servers, tamper-evident audit chain). 32 composable packages. Self-host on any infra. Docs at [docs.revealui.com](https://docs.revealui.com).
 
-Product line: **Free** · **Pro** $49 · **Max** $99 · **Enterprise** inquire.
-
 Try it:
 
 - `npx create-revealui@latest`
